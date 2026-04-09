@@ -1,0 +1,5 @@
+{
+  "python": {
+    "dependencies": ["python-jose[cryptography]>=3.3", "passlib[bcrypt]>=1.7"]
+  }
+}

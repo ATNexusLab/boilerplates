@@ -1,0 +1,16 @@
+[project]
+name = "{{PROJECT_NAME}}"
+version = "0.1.0"
+description = ""
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.1",
+    "flask-cors>=5.0",
+    "gunicorn>=23.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+]

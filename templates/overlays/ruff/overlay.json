@@ -1,0 +1,5 @@
+{
+  "python": {
+    "devDependencies": ["ruff>=0.8"]
+  }
+}

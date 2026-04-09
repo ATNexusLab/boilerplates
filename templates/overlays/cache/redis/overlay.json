@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "ioredis": "^5.4"
+  },
+  "python": {
+    "dependencies": ["redis>=5.2"]
+  }
+}

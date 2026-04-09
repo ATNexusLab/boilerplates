@@ -1,0 +1,14 @@
+{
+  "dependencies": {
+    "drizzle-orm": "^0.38",
+    "mysql2": "^3.11"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}

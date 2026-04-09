@@ -1,0 +1,5 @@
+{
+  "python": {
+    "dependencies": ["flask-login>=0.6"]
+  }
+}

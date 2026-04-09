@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - ENV=production
+      - DEBUG=false
+    env_file:
+      - .env
+    restart: unless-stopped

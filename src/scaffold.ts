@@ -4,8 +4,16 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import type { UserChoices } from "./prompts.js";
-import type { PackageManager } from "./templates.js";
+import type { UserChoices, BackendChoices, FrontendChoices } from "./prompts.js";
+import {
+  type PackageManager,
+  type PythonPackageManager,
+  type Framework,
+  type Database,
+  type Cache,
+  isPythonFramework,
+  isPythonPackageManager,
+} from "./templates.js";
 
 const templatesDir = path.resolve(
   fileURLToPath(import.meta.url),
@@ -52,6 +60,9 @@ const TEXT_EXTENSIONS = new Set([
   ".cjs",
   ".vue",
   ".svelte",
+  ".py",
+  ".pyi",
+  ".prisma",
 ]);
 
 const SKIP_FILES = new Set(["template.json", "overlay.json"]);
@@ -68,15 +79,26 @@ insert_final_newline = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+[*.py]
+indent_size = 4
 `;
+
+// ── Utility Functions ──────────────────────────────────────────────────────
 
 function isTextFile(filename: string): boolean {
   const ext = path.extname(filename).toLowerCase();
   if (TEXT_EXTENSIONS.has(ext)) return true;
   const base = path.basename(filename);
-  return ["Dockerfile", "Makefile", ".gitignore", ".dockerignore"].includes(
-    base,
-  );
+  return [
+    "Dockerfile",
+    "Makefile",
+    ".gitignore",
+    ".dockerignore",
+    "Procfile",
+    "requirements.txt",
+    "requirements-dev.txt",
+  ].includes(base);
 }
 
 function isCommandAvailable(cmd: string): boolean {
@@ -115,6 +137,13 @@ interface PackageJson {
   [key: string]: unknown;
 }
 
+interface OverlayJson extends PackageJson {
+  python?: {
+    dependencies?: string[];
+    devDependencies?: string[];
+  };
+}
+
 function mergePackageJson(targetPath: string, overlayPath: string): void {
   if (!fs.existsSync(targetPath) || !fs.existsSync(overlayPath)) return;
 
@@ -151,9 +180,71 @@ function mergeEnvExample(targetDir: string, overlayDir: string, sectionName: str
     return;
   }
 
+  // Delegate to content-based merge with deduplication
+  mergeEnvExampleContent(targetDir, sectionName, overlayContent);
+}
+
+function mergeEnvExampleContent(targetDir: string, sectionName: string, content: string): void {
+  const targetEnv = path.join(targetDir, ".env.example");
+
+  if (!fs.existsSync(targetEnv)) {
+    fs.writeFileSync(targetEnv, `# ${sectionName}\n${content}\n`);
+    return;
+  }
+
   const existing = fs.readFileSync(targetEnv, "utf-8").trimEnd();
-  const merged = `${existing}\n\n# ${sectionName}\n${overlayContent}\n`;
+
+  // Deduplicate: only add lines whose KEY= is not already present
+  const existingKeys = new Set(
+    existing
+      .split("\n")
+      .filter((l) => l.includes("=") && !l.startsWith("#"))
+      .map((l) => l.split("=")[0].trim()),
+  );
+
+  const newLines = content
+    .split("\n")
+    .filter((l) => {
+      if (!l.includes("=") || l.startsWith("#")) return true;
+      return !existingKeys.has(l.split("=")[0].trim());
+    })
+    .join("\n")
+    .trim();
+
+  if (!newLines) return;
+
+  const merged = `${existing}\n\n# ${sectionName}\n${newLines}\n`;
   fs.writeFileSync(targetEnv, merged);
+}
+
+function mergePythonDeps(targetDir: string, overlayPath: string): void {
+  if (!fs.existsSync(overlayPath)) return;
+
+  const overlay: OverlayJson = JSON.parse(
+    fs.readFileSync(overlayPath, "utf-8"),
+  );
+
+  if (!overlay.python) return;
+
+  const reqPath = path.join(targetDir, "requirements.txt");
+  if (fs.existsSync(reqPath)) {
+    const existing = fs.readFileSync(reqPath, "utf-8").trimEnd();
+    const newDeps = overlay.python.dependencies ?? [];
+    if (newDeps.length > 0) {
+      fs.writeFileSync(reqPath, existing + "\n" + newDeps.join("\n") + "\n");
+    }
+  }
+
+  const reqDevPath = path.join(targetDir, "requirements-dev.txt");
+  const devDeps = overlay.python.devDependencies ?? [];
+  if (devDeps.length > 0) {
+    if (fs.existsSync(reqDevPath)) {
+      const existing = fs.readFileSync(reqDevPath, "utf-8").trimEnd();
+      fs.writeFileSync(reqDevPath, existing + "\n" + devDeps.join("\n") + "\n");
+    } else {
+      fs.writeFileSync(reqDevPath, devDeps.join("\n") + "\n");
+    }
+  }
 }
 
 function replaceVariables(
@@ -186,49 +277,390 @@ function replaceVariables(
   }
 }
 
-function getInstallCommand(pm: PackageManager): string {
+// ── Install / Dev Commands ─────────────────────────────────────────────────
+
+function getInstallCommand(pm: PackageManager | PythonPackageManager): string {
   switch (pm) {
     case "bun": return "bun install";
     case "pnpm": return "pnpm install";
     case "yarn": return "yarn install";
+    case "pip": return "pip install -r requirements.txt";
+    case "poetry": return "poetry install";
+    case "uv": return "uv sync";
     default: return "npm install";
   }
 }
 
-function getDevCommand(pm: PackageManager): string {
+function getDevCommand(pm: PackageManager | PythonPackageManager): string {
   switch (pm) {
     case "bun": return "bun dev";
     case "pnpm": return "pnpm dev";
     case "yarn": return "yarn dev";
+    case "pip": return "python src/server.py";
+    case "poetry": return "poetry run python src/server.py";
+    case "uv": return "uv run python src/server.py";
     default: return "npm run dev";
   }
 }
 
+// ── Prerequisites ──────────────────────────────────────────────────────────
+
 function checkPrerequisites(choices: UserChoices): void {
-  if (choices.framework === "flutter" && !isCommandAvailable("flutter")) {
-    p.log.warn(
-      pc.yellow("⚠ Flutter CLI não encontrado no PATH. Instale em https://flutter.dev/docs/get-started/install"),
-    );
+  const frameworks = getScaffoldFrameworks(choices);
+
+  for (const fw of frameworks) {
+    if (fw === "flutter" && !isCommandAvailable("flutter")) {
+      p.log.warn(
+        pc.yellow("⚠ Flutter CLI não encontrado no PATH. Instale em https://flutter.dev/docs/get-started/install"),
+      );
+    }
   }
 
-  if (choices.packageManager === "bun" && !isCommandAvailable("bun")) {
-    p.log.warn(
-      pc.yellow("⚠ Bun não encontrado no PATH. Instale em https://bun.sh"),
-    );
-  }
-
-  if (choices.packageManager === "pnpm" && !isCommandAvailable("pnpm")) {
-    p.log.warn(
-      pc.yellow("⚠ pnpm não encontrado no PATH. Instale com: npm install -g pnpm"),
-    );
-  }
-
-  if (choices.packageManager === "yarn" && !isCommandAvailable("yarn")) {
-    p.log.warn(
-      pc.yellow("⚠ Yarn não encontrado no PATH. Instale com: npm install -g yarn"),
-    );
+  const pms = getPackageManagers(choices);
+  for (const pm of pms) {
+    if (pm === "bun" && !isCommandAvailable("bun")) {
+      p.log.warn(pc.yellow("⚠ Bun não encontrado no PATH. Instale em https://bun.sh"));
+    }
+    if (pm === "pnpm" && !isCommandAvailable("pnpm")) {
+      p.log.warn(pc.yellow("⚠ pnpm não encontrado no PATH. Instale com: npm install -g pnpm"));
+    }
+    if (pm === "yarn" && !isCommandAvailable("yarn")) {
+      p.log.warn(pc.yellow("⚠ Yarn não encontrado no PATH. Instale com: npm install -g yarn"));
+    }
+    if (pm === "poetry" && !isCommandAvailable("poetry")) {
+      p.log.warn(pc.yellow("⚠ Poetry não encontrado no PATH. Instale em https://python-poetry.org"));
+    }
+    if (pm === "uv" && !isCommandAvailable("uv")) {
+      p.log.warn(pc.yellow("⚠ uv não encontrado no PATH. Instale em https://docs.astral.sh/uv"));
+    }
   }
 }
+
+function getScaffoldFrameworks(choices: UserChoices): Framework[] {
+  const fws: Framework[] = [];
+  if (choices.backend) fws.push(choices.backend.apiFramework);
+  if (choices.frontend?.webFramework) fws.push(choices.frontend.webFramework);
+  if (choices.frontend?.mobileFramework) fws.push(choices.frontend.mobileFramework);
+  return fws;
+}
+
+function getPackageManagers(choices: UserChoices): (PackageManager | PythonPackageManager)[] {
+  const pms: (PackageManager | PythonPackageManager)[] = [];
+  if (choices.backend) pms.push(choices.backend.packageManager);
+  if (choices.frontend) pms.push(choices.frontend.packageManager);
+  return [...new Set(pms)];
+}
+
+// ── Docker Compose Generation ──────────────────────────────────────────────
+
+function generateDockerComposeServices(
+  appFramework: Framework,
+  database: Database | null,
+  cache: Cache | null,
+): string {
+  let yaml = "";
+
+  // DB service
+  if (database === "postgresql") {
+    yaml += `
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: \${DB_USER:-postgres}
+      POSTGRES_PASSWORD: \${DB_PASSWORD:-postgres}
+      POSTGRES_DB: \${DB_NAME:-app}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+`;
+  } else if (database === "mysql") {
+    yaml += `
+  db:
+    image: mysql:8
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: \${DB_PASSWORD:-root}
+      MYSQL_DATABASE: \${DB_NAME:-app}
+      MYSQL_USER: \${DB_USER:-app}
+      MYSQL_PASSWORD: \${DB_PASSWORD:-app}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+`;
+  } else if (database === "mongodb") {
+    yaml += `
+  db:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: \${DB_USER:-mongo}
+      MONGO_INITDB_ROOT_PASSWORD: \${DB_PASSWORD:-mongo}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+`;
+  }
+
+  // Cache service
+  if (cache === "redis") {
+    yaml += `
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+`;
+  }
+
+  return yaml;
+}
+
+function generateDockerComposeVolumes(
+  database: Database | null,
+  cache: Cache | null,
+): string {
+  const volumes: string[] = [];
+  if (database === "postgresql") volumes.push("  postgres_data:");
+  if (database === "mysql") volumes.push("  mysql_data:");
+  if (database === "mongodb") volumes.push("  mongo_data:");
+  if (cache === "redis") volumes.push("  redis_data:");
+  if (volumes.length === 0) return "";
+  return "\nvolumes:\n" + volumes.join("\n") + "\n";
+}
+
+function appendDockerComposeServices(
+  targetDir: string,
+  database: Database | null,
+  cache: Cache | null,
+  framework: Framework,
+): void {
+  const dcPath = path.join(targetDir, "docker-compose.yml");
+  if (!fs.existsSync(dcPath)) return;
+  if (!database && !cache) return;
+
+  let content = fs.readFileSync(dcPath, "utf-8");
+
+  // Add depends_on to app service
+  const dependsOn: string[] = [];
+  if (database) dependsOn.push("db");
+  if (cache) dependsOn.push("cache");
+
+  if (dependsOn.length > 0) {
+    const dependsOnYaml = dependsOn.map((d) => `      - ${d}`).join("\n");
+    // Insert depends_on after env_file block (key + indented items)
+    content = content.replace(
+      /(    env_file:\n(?:      - .+\n)*)/,
+      `$1    depends_on:\n${dependsOnYaml}\n`,
+    );
+  }
+
+  // Append services before volumes (or at end)
+  const extraServices = generateDockerComposeServices(framework, database, cache);
+  const extraVolumes = generateDockerComposeVolumes(database, cache);
+
+  content = content.trimEnd() + "\n" + extraServices + extraVolumes;
+  fs.writeFileSync(dcPath, content);
+}
+
+// ── Overlay Application ────────────────────────────────────────────────────
+
+function applyOverlay(
+  targetDir: string,
+  overlayName: string,
+  framework?: string,
+  sectionName?: string,
+): void {
+  const overlayDir = framework
+    ? path.join(templatesDir, "overlays", overlayName, framework)
+    : path.join(templatesDir, "overlays", overlayName);
+
+  if (!fs.existsSync(overlayDir)) return;
+
+  copyDir(overlayDir, targetDir);
+
+  const overlayJsonPath = path.join(overlayDir, "overlay.json");
+  const targetPkgPath = path.join(targetDir, "package.json");
+
+  if (fs.existsSync(overlayJsonPath)) {
+    // JS/TS deps
+    if (fs.existsSync(targetPkgPath)) {
+      mergePackageJson(targetPkgPath, overlayJsonPath);
+    }
+    // Python deps
+    mergePythonDeps(targetDir, overlayJsonPath);
+  }
+
+  if (sectionName) {
+    mergeEnvExample(targetDir, overlayDir, sectionName);
+  }
+}
+
+// ── Single Project Scaffold ────────────────────────────────────────────────
+
+function scaffoldSingleProject(
+  targetDir: string,
+  framework: Framework,
+  choices: UserChoices,
+  isBackend: boolean,
+): void {
+  // 1. Copy base template
+  const baseDir = path.join(templatesDir, "base", framework);
+  if (!fs.existsSync(baseDir)) {
+    throw new Error(
+      `Template base não encontrado para "${framework}". Verifique se os templates estão instalados.`,
+    );
+  }
+  copyDir(baseDir, targetDir);
+
+  const backend = isBackend ? choices.backend : null;
+  const frontend = !isBackend ? choices.frontend : null;
+  const isPython = isBackend && backend && isPythonFramework(backend.apiFramework);
+
+  // 2. Apply linter overlay
+  const linter = isBackend ? backend?.linter : frontend?.linter;
+  if (linter) {
+    applyOverlay(targetDir, linter);
+  }
+
+  // 3. Apply database overlay
+  if (backend?.database) {
+    const dbOverlayDir = path.join(templatesDir, "overlays", "databases", backend.database);
+    if (fs.existsSync(dbOverlayDir)) {
+      const overlayJsonPath = path.join(dbOverlayDir, "overlay.json");
+      if (fs.existsSync(overlayJsonPath)) {
+        const targetPkgPath = path.join(targetDir, "package.json");
+        if (!isPython && fs.existsSync(targetPkgPath)) {
+          mergePackageJson(targetPkgPath, overlayJsonPath);
+        }
+        if (isPython) {
+          mergePythonDeps(targetDir, overlayJsonPath);
+        }
+      }
+      mergeEnvExample(targetDir, dbOverlayDir, "Database");
+    }
+  }
+
+  // 4. Apply ORM overlay
+  if (backend?.orm) {
+    const ormBase = path.join(templatesDir, "overlays", "orm", backend.orm);
+    // Drizzle has per-database subfolders
+    const ormDir = backend.orm === "drizzle" && backend.database
+      ? path.join(ormBase, backend.database)
+      : ormBase;
+
+    if (fs.existsSync(ormDir)) {
+      copyDir(ormDir, targetDir);
+      const overlayJsonPath = path.join(ormDir, "overlay.json");
+      if (fs.existsSync(overlayJsonPath)) {
+        const targetPkgPath = path.join(targetDir, "package.json");
+        if (!isPython && fs.existsSync(targetPkgPath)) {
+          mergePackageJson(targetPkgPath, overlayJsonPath);
+        }
+        if (isPython) {
+          mergePythonDeps(targetDir, overlayJsonPath);
+        }
+      }
+    }
+  }
+
+  // 5. Apply cache overlay
+  if (backend?.cache) {
+    const cacheOverlayDir = path.join(templatesDir, "overlays", "cache", backend.cache);
+    if (fs.existsSync(cacheOverlayDir)) {
+      // Copy appropriate connection helper based on language
+      if (isPython) {
+        const pyHelper = path.join(cacheOverlayDir, "src", "lib", "redis.py");
+        if (fs.existsSync(pyHelper)) {
+          const destDir = path.join(targetDir, "src", "lib");
+          fs.mkdirSync(destDir, { recursive: true });
+          fs.copyFileSync(pyHelper, path.join(destDir, "redis.py"));
+        }
+      } else {
+        const tsHelper = path.join(cacheOverlayDir, "src", "lib", "redis.ts");
+        if (fs.existsSync(tsHelper)) {
+          const destDir = path.join(targetDir, "src", "lib");
+          fs.mkdirSync(destDir, { recursive: true });
+          fs.copyFileSync(tsHelper, path.join(destDir, "redis.ts"));
+        }
+      }
+
+      const overlayJsonPath = path.join(cacheOverlayDir, "overlay.json");
+      if (fs.existsSync(overlayJsonPath)) {
+        const targetPkgPath = path.join(targetDir, "package.json");
+        if (!isPython && fs.existsSync(targetPkgPath)) {
+          mergePackageJson(targetPkgPath, overlayJsonPath);
+        }
+        if (isPython) {
+          mergePythonDeps(targetDir, overlayJsonPath);
+        }
+      }
+      mergeEnvExample(targetDir, cacheOverlayDir, "Cache");
+    }
+  }
+
+  // 6. Apply auth overlay
+  if (backend?.includeAuth) {
+    if (isPython) {
+      const authOverlayName =
+        backend.apiFramework === "flask"
+          ? "flask-login"
+          : backend.apiFramework === "fastapi"
+            ? "fastapi-security"
+            : "django-auth";
+      applyOverlay(targetDir, `auth/${authOverlayName}`, undefined, authOverlayName);
+    } else {
+      applyOverlay(targetDir, "better-auth", backend.apiFramework, "Better Auth");
+    }
+  }
+
+  // 7. Apply Docker overlay
+  if (choices.includeDocker) {
+    applyOverlay(targetDir, "docker", framework);
+
+    // Append DB/Cache services to docker-compose
+    if (backend) {
+      appendDockerComposeServices(
+        targetDir,
+        backend.database,
+        backend.cache,
+        framework,
+      );
+    }
+  }
+
+  // 8. Apply CI overlay
+  if (choices.includeCI) {
+    applyOverlay(targetDir, "github-actions");
+  }
+}
+
+// ── Main Scaffold ──────────────────────────────────────────────────────────
 
 export async function scaffold(choices: UserChoices): Promise<void> {
   const targetDir = path.resolve(process.cwd(), choices.projectName);
@@ -239,76 +671,53 @@ export async function scaffold(choices: UserChoices): Promise<void> {
     );
   }
 
-  // Check prerequisites
   checkPrerequisites(choices);
 
-  // Verify base template exists
-  const baseDir = path.join(templatesDir, "base", choices.framework);
-  if (!fs.existsSync(baseDir)) {
-    throw new Error(
-      `Template base não encontrado para "${choices.framework}". Verifique se os templates estão instalados.`,
-    );
-  }
+  const isMonorepo = Boolean(
+    (choices.projectType === "fullstack" && choices.backend && choices.frontend) ||
+    (choices.frontend?.platform === "both"),
+  );
 
   try {
-    // 1. Copy base template
-    copyDir(baseDir, targetDir);
+    fs.mkdirSync(targetDir, { recursive: true });
 
-    const targetPkgPath = path.join(targetDir, "package.json");
-
-    // 2. Apply linter overlay
-    if (choices.linter) {
-      const linterDir = path.join(templatesDir, "overlays", choices.linter);
-      copyDir(linterDir, targetDir);
-
-      const linterOverlay = path.join(linterDir, "overlay.json");
-      mergePackageJson(targetPkgPath, linterOverlay);
+    if (isMonorepo) {
+      scaffoldMonorepo(targetDir, choices);
+    } else {
+      scaffoldSingle(targetDir, choices);
     }
 
-    // 3. Apply Better Auth overlay
-    if (choices.includeBetterAuth) {
-      const authDir = path.join(
-        templatesDir,
-        "overlays",
-        "better-auth",
-        choices.framework,
-      );
-      copyDir(authDir, targetDir);
-
-      const authOverlay = path.join(authDir, "overlay.json");
-      mergePackageJson(targetPkgPath, authOverlay);
-      mergeEnvExample(targetDir, authDir, "Better Auth");
-    }
-
-    // 4. Apply Docker overlay
-    if (choices.includeDocker) {
-      const dockerDir = path.join(
-        templatesDir,
-        "overlays",
-        "docker",
-        choices.framework,
-      );
-      copyDir(dockerDir, targetDir);
-
-      const dockerOverlay = path.join(dockerDir, "overlay.json");
-      mergePackageJson(targetPkgPath, dockerOverlay);
-    }
-
-    // 5. Apply GitHub Actions CI overlay
-    if (choices.includeCI) {
-      const ciDir = path.join(templatesDir, "overlays", "github-actions");
-      copyDir(ciDir, targetDir);
-    }
-
-    // 6. Write .editorconfig
+    // Write .editorconfig
     fs.writeFileSync(path.join(targetDir, ".editorconfig"), EDITORCONFIG);
 
-    // 7. Replace template variables
-    replaceVariables(targetDir, {
+    // Replace template variables
+    const templateVars: Record<string, string> = {
       PROJECT_NAME: choices.projectName,
-    });
+    };
 
-    // 8. Initialize git repository
+    // Set PRISMA_PROVIDER if needed
+    if (choices.backend?.orm === "prisma" && choices.backend.database) {
+      const providerMap: Record<string, string> = {
+        postgresql: "postgresql",
+        mysql: "mysql",
+        mongodb: "mongodb",
+      };
+      templateVars.PRISMA_PROVIDER = providerMap[choices.backend.database];
+    }
+
+    // Set DATABASE_URL placeholder
+    if (choices.backend?.database) {
+      const urlMap: Record<string, string> = {
+        postgresql: "postgresql://user:password@localhost:5432/app",
+        mysql: "mysql://user:password@localhost:3306/app",
+        mongodb: "mongodb://user:password@localhost:27017/app",
+      };
+      templateVars.DATABASE_URL = urlMap[choices.backend.database];
+    }
+
+    replaceVariables(targetDir, templateVars);
+
+    // Initialize git repository
     if (isCommandAvailable("git")) {
       try {
         execSync("git init", { cwd: targetDir, stdio: "ignore" });
@@ -323,28 +732,147 @@ export async function scaffold(choices: UserChoices): Promise<void> {
       }
     }
 
-    // 9. Print success
+    // Print success
     console.log();
     console.log(pc.green("✅ Projeto criado com sucesso!"));
     console.log();
 
-    // 10. Install dependencies
-    if (choices.framework === "flutter") {
-      printFlutterInstructions(choices.projectName);
-    } else {
-      const pm = choices.packageManager ?? "npm";
-      await maybeInstallDependencies(targetDir, pm);
-      printInstructions(choices.projectName, pm);
-    }
+    // Install dependencies
+    await handlePostScaffold(targetDir, choices, isMonorepo);
 
     console.log();
   } catch (error) {
-    // Rollback: remove created directory on failure
     if (fs.existsSync(targetDir)) {
       fs.rmSync(targetDir, { recursive: true, force: true });
     }
     throw error;
   }
+}
+
+function scaffoldSingle(targetDir: string, choices: UserChoices): void {
+  if (choices.backend) {
+    scaffoldSingleProject(targetDir, choices.backend.apiFramework, choices, true);
+  } else if (choices.frontend) {
+    const fw = choices.frontend.webFramework ?? choices.frontend.mobileFramework;
+    if (!fw) throw new Error("Nenhum framework selecionado.");
+    scaffoldSingleProject(targetDir, fw, choices, false);
+  }
+}
+
+function scaffoldMonorepo(targetDir: string, choices: UserChoices): void {
+  const appsDir = path.join(targetDir, "apps");
+  fs.mkdirSync(appsDir, { recursive: true });
+
+  // Scaffold backend in apps/api/
+  if (choices.backend) {
+    const apiDir = path.join(appsDir, "api");
+    scaffoldSingleProject(apiDir, choices.backend.apiFramework, choices, true);
+  }
+
+  // Scaffold web frontend in apps/web/
+  if (choices.frontend?.webFramework) {
+    const webDir = path.join(appsDir, "web");
+    scaffoldSingleProject(webDir, choices.frontend.webFramework, choices, false);
+  }
+
+  // Scaffold mobile in apps/mobile/
+  if (choices.frontend?.mobileFramework) {
+    const mobileDir = path.join(appsDir, "mobile");
+    scaffoldSingleProject(mobileDir, choices.frontend.mobileFramework, choices, false);
+  }
+
+  // Generate root files
+  generateMonorepoRoot(targetDir, choices);
+}
+
+function generateMonorepoRoot(targetDir: string, choices: UserChoices): void {
+  // Root .gitignore
+  const gitignore = `node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+*.log
+logs/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+`;
+  fs.writeFileSync(path.join(targetDir, ".gitignore"), gitignore);
+
+  // Root README
+  const parts: string[] = [];
+  if (choices.backend) parts.push(`- \`apps/api/\` — ${choices.backend.apiFramework} API`);
+  if (choices.frontend?.webFramework) parts.push(`- \`apps/web/\` — ${choices.frontend.webFramework}`);
+  if (choices.frontend?.mobileFramework) parts.push(`- \`apps/mobile/\` — ${choices.frontend.mobileFramework}`);
+
+  const readme = `# ${choices.projectName}
+
+## Estrutura
+
+${parts.join("\n")}
+
+## Começando
+
+Cada app tem seu próprio \`package.json\` (ou \`requirements.txt\`). Acesse o diretório de cada app para instalar dependências e rodar.
+`;
+  fs.writeFileSync(path.join(targetDir, "README.md"), readme);
+
+  // Root package.json with workspaces (for JS/TS apps only)
+  const jsApps: string[] = [];
+  if (choices.backend && !isPythonFramework(choices.backend.apiFramework)) {
+    jsApps.push("apps/api");
+  }
+  if (choices.frontend?.webFramework) jsApps.push("apps/web");
+  if (choices.frontend?.mobileFramework && choices.frontend.mobileFramework !== "flutter") {
+    jsApps.push("apps/mobile");
+  }
+
+  if (jsApps.length > 0) {
+    const rootPkg = {
+      name: choices.projectName,
+      private: true,
+      workspaces: jsApps,
+    };
+    fs.writeFileSync(
+      path.join(targetDir, "package.json"),
+      JSON.stringify(rootPkg, null, 2) + "\n",
+    );
+  }
+}
+
+// ── Post-scaffold ──────────────────────────────────────────────────────────
+
+async function handlePostScaffold(
+  targetDir: string,
+  choices: UserChoices,
+  isMonorepo: boolean,
+): Promise<void> {
+  if (isMonorepo) {
+    printMonorepoInstructions(choices);
+    return;
+  }
+
+  // Single project
+  const hasMobile = choices.frontend?.mobileFramework === "flutter";
+  if (hasMobile && !choices.frontend?.webFramework) {
+    printFlutterInstructions(choices.projectName);
+    return;
+  }
+
+  const pm =
+    choices.backend?.packageManager ??
+    choices.frontend?.packageManager ??
+    "npm";
+
+  if (!isPythonPackageManager(pm)) {
+    await maybeInstallDependencies(targetDir, pm);
+  } else {
+    p.log.info(`Para instalar dependências: ${pc.cyan(getInstallCommand(pm))}`);
+  }
+
+  printInstructions(choices.projectName, pm);
 }
 
 async function maybeInstallDependencies(
@@ -380,7 +908,7 @@ function printFlutterInstructions(projectName: string): void {
   console.log(`  ${pc.cyan("flutter run")}`);
 }
 
-function printInstructions(projectName: string, pm: PackageManager): void {
+function printInstructions(projectName: string, pm: PackageManager | PythonPackageManager): void {
   const installCmd = getInstallCommand(pm);
   const devCmd = getDevCommand(pm);
 
@@ -388,4 +916,33 @@ function printInstructions(projectName: string, pm: PackageManager): void {
   console.log(`  ${pc.cyan(`cd ${projectName}`)}`);
   console.log(`  ${pc.cyan(installCmd)}`);
   console.log(`  ${pc.cyan(devCmd)}`);
+}
+
+function printMonorepoInstructions(choices: UserChoices): void {
+  console.log(pc.bold("Próximos passos:"));
+  console.log(`  ${pc.cyan(`cd ${choices.projectName}`)}`);
+  console.log();
+
+  if (choices.backend) {
+    const pm = choices.backend.packageManager;
+    console.log(pc.bold("  API:"));
+    console.log(`    ${pc.cyan(`cd apps/api && ${getInstallCommand(pm)}`)}`);
+  }
+
+  if (choices.frontend?.webFramework) {
+    const pm = choices.frontend.packageManager;
+    console.log(pc.bold("  Web:"));
+    console.log(`    ${pc.cyan(`cd apps/web && ${getInstallCommand(pm)}`)}`);
+  }
+
+  if (choices.frontend?.mobileFramework) {
+    const fw = choices.frontend.mobileFramework;
+    console.log(pc.bold("  Mobile:"));
+    if (fw === "flutter") {
+      console.log(`    ${pc.cyan("cd apps/mobile && flutter pub get")}`);
+    } else {
+      const pm = choices.frontend.packageManager;
+      console.log(`    ${pc.cyan(`cd apps/mobile && ${getInstallCommand(pm)}`)}`);
+    }
+  }
 }

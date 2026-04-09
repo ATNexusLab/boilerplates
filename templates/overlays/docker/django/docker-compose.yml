@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - DJANGO_ENV=production
+      - DEBUG=False
+    env_file:
+      - .env
+    restart: unless-stopped

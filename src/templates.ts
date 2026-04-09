@@ -1,49 +1,128 @@
-export type ProjectType = "backend" | "frontend" | "fullstack" | "mobile";
-export type Framework =
-  | "elysiajs"
-  | "express"
-  | "react"
-  | "vue"
-  | "nextjs"
-  | "vinext"
-  | "flutter"
-  | "react-native";
-export type PackageManager = "npm" | "bun" | "pnpm" | "yarn";
-export type Linter = "eslint-prettier" | "biome";
+// ── Project Types ──────────────────────────────────────────────────────────
 
-export interface FrameworkConfig {
-  name: Framework;
+export type ProjectType = "backend" | "frontend" | "fullstack" | "mobile";
+
+// ── Framework Types ────────────────────────────────────────────────────────
+
+export type ApiFramework = "express" | "elysiajs" | "flask" | "fastapi" | "django";
+export type WebFramework = "nextjs" | "react" | "vue" | "vinext";
+export type MobileFramework = "flutter" | "react-native";
+
+/** Union of all frameworks (used for template directory resolution) */
+export type Framework = ApiFramework | WebFramework | MobileFramework;
+
+// ── Infrastructure Types ───────────────────────────────────────────────────
+
+export type Database = "postgresql" | "mysql" | "mongodb";
+export type ORM = "prisma" | "drizzle" | "sqlalchemy";
+export type Cache = "redis";
+export type Platform = "web" | "mobile" | "both";
+
+// ── Package Manager & Linter Types ─────────────────────────────────────────
+
+export type PackageManager = "npm" | "bun" | "pnpm" | "yarn";
+export type PythonPackageManager = "pip" | "poetry" | "uv";
+export type Linter = "eslint-prettier" | "biome";
+export type PythonLinter = "ruff";
+
+// ── Framework Configs ──────────────────────────────────────────────────────
+
+export interface ApiFrameworkConfig {
+  name: ApiFramework;
   displayName: string;
-  type: ProjectType;
-  packageManagers: PackageManager[];
+  packageManagers: PackageManager[] | PythonPackageManager[];
   supportsBetterAuth: boolean;
   supportsDocker: boolean;
-  supportsVite: boolean;
+  supportedDatabases: Database[];
+  supportedORMs: ORM[];
 }
 
-export const frameworks: Map<Framework, FrameworkConfig> = new Map([
+export interface WebFrameworkConfig {
+  name: WebFramework;
+  displayName: string;
+  packageManagers: PackageManager[];
+  supportsDocker: boolean;
+}
+
+export interface MobileFrameworkConfig {
+  name: MobileFramework;
+  displayName: string;
+  packageManagers: PackageManager[];
+}
+
+// ── Registries ─────────────────────────────────────────────────────────────
+
+export const apiFrameworks: Map<ApiFramework, ApiFrameworkConfig> = new Map([
+  [
+    "express",
+    {
+      name: "express",
+      displayName: "Express",
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
+      supportsBetterAuth: true,
+      supportsDocker: true,
+      supportedDatabases: ["postgresql", "mysql", "mongodb"],
+      supportedORMs: ["prisma", "drizzle"],
+    },
+  ],
   [
     "elysiajs",
     {
       name: "elysiajs",
       displayName: "ElysiaJS",
-      type: "backend",
       packageManagers: ["bun"],
       supportsBetterAuth: true,
       supportsDocker: true,
-      supportsVite: false,
+      supportedDatabases: ["postgresql", "mysql", "mongodb"],
+      supportedORMs: ["prisma", "drizzle"],
     },
   ],
   [
-    "express",
+    "flask",
     {
-      name: "express",
-      displayName: "ExpressJS",
-      type: "backend",
-      packageManagers: ["npm", "bun", "pnpm", "yarn"],
-      supportsBetterAuth: true,
+      name: "flask",
+      displayName: "Flask",
+      packageManagers: ["pip", "poetry", "uv"],
+      supportsBetterAuth: false,
       supportsDocker: true,
-      supportsVite: false,
+      supportedDatabases: ["postgresql", "mysql", "mongodb"],
+      supportedORMs: ["sqlalchemy"],
+    },
+  ],
+  [
+    "fastapi",
+    {
+      name: "fastapi",
+      displayName: "FastAPI",
+      packageManagers: ["pip", "poetry", "uv"],
+      supportsBetterAuth: false,
+      supportsDocker: true,
+      supportedDatabases: ["postgresql", "mysql", "mongodb"],
+      supportedORMs: ["sqlalchemy"],
+    },
+  ],
+  [
+    "django",
+    {
+      name: "django",
+      displayName: "Django",
+      packageManagers: ["pip", "poetry", "uv"],
+      supportsBetterAuth: false,
+      supportsDocker: true,
+      supportedDatabases: ["postgresql", "mysql"],
+      supportedORMs: [],
+    },
+  ],
+]);
+
+export const webFrameworks: Map<WebFramework, WebFrameworkConfig> = new Map([
+  [
+    "nextjs",
+    {
+      name: "nextjs",
+      displayName: "Next.js",
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
+      supportsDocker: true,
     },
   ],
   [
@@ -51,11 +130,8 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
     {
       name: "react",
       displayName: "React",
-      type: "frontend",
       packageManagers: ["npm", "bun", "pnpm", "yarn"],
-      supportsBetterAuth: false,
       supportsDocker: true,
-      supportsVite: true,
     },
   ],
   [
@@ -63,23 +139,8 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
     {
       name: "vue",
       displayName: "Vue",
-      type: "frontend",
       packageManagers: ["npm", "bun", "pnpm", "yarn"],
-      supportsBetterAuth: false,
       supportsDocker: true,
-      supportsVite: true,
-    },
-  ],
-  [
-    "nextjs",
-    {
-      name: "nextjs",
-      displayName: "NextJS",
-      type: "fullstack",
-      packageManagers: ["npm", "bun", "pnpm", "yarn"],
-      supportsBetterAuth: true,
-      supportsDocker: true,
-      supportsVite: false,
     },
   ],
   [
@@ -87,47 +148,100 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
     {
       name: "vinext",
       displayName: "Vinext",
-      type: "fullstack",
       packageManagers: ["npm", "bun", "pnpm", "yarn"],
-      supportsBetterAuth: true,
       supportsDocker: true,
-      supportsVite: true,
-    },
-  ],
-  [
-    "flutter",
-    {
-      name: "flutter",
-      displayName: "Flutter",
-      type: "mobile",
-      packageManagers: [],
-      supportsBetterAuth: false,
-      supportsDocker: true,
-      supportsVite: false,
-    },
-  ],
-  [
-    "react-native",
-    {
-      name: "react-native",
-      displayName: "React Native",
-      type: "mobile",
-      packageManagers: ["npm", "bun", "pnpm", "yarn"],
-      supportsBetterAuth: false,
-      supportsDocker: false,
-      supportsVite: false,
     },
   ],
 ]);
 
-export function getFrameworksByType(type: ProjectType): FrameworkConfig[] {
-  return [...frameworks.values()].filter((f) => f.type === type);
+export const mobileFrameworks: Map<MobileFramework, MobileFrameworkConfig> =
+  new Map([
+    [
+      "flutter",
+      {
+        name: "flutter",
+        displayName: "Flutter",
+        packageManagers: [],
+      },
+    ],
+    [
+      "react-native",
+      {
+        name: "react-native",
+        displayName: "React Native",
+        packageManagers: ["npm", "bun", "pnpm", "yarn"],
+      },
+    ],
+  ]);
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const PYTHON_FRAMEWORKS: ReadonlySet<ApiFramework> = new Set([
+  "flask",
+  "fastapi",
+  "django",
+]);
+
+export function isPythonFramework(fw: ApiFramework): boolean {
+  return PYTHON_FRAMEWORKS.has(fw);
 }
 
-export function getFrameworkConfig(framework: Framework): FrameworkConfig {
-  const config = frameworks.get(framework);
-  if (!config) {
-    throw new Error(`Unknown framework: ${framework}`);
-  }
-  return config;
+export function getAvailableORMs(
+  apiFramework: ApiFramework,
+  database: Database | null,
+): ORM[] {
+  if (!database) return [];
+  // Django uses its own ORM
+  if (apiFramework === "django") return [];
+  const config = apiFrameworks.get(apiFramework);
+  if (!config) return [];
+
+  return config.supportedORMs.filter((orm) => {
+    // Drizzle does not support MongoDB
+    if (orm === "drizzle" && database === "mongodb") return false;
+    return true;
+  });
+}
+
+export function getAvailableDatabases(apiFramework: ApiFramework): Database[] {
+  const config = apiFrameworks.get(apiFramework);
+  return config?.supportedDatabases ?? [];
+}
+
+export function getAvailableLinters(
+  apiFramework: ApiFramework,
+): (Linter | PythonLinter)[] {
+  if (isPythonFramework(apiFramework)) return ["ruff"];
+  return ["eslint-prettier", "biome"];
+}
+
+export function getAvailablePackageManagers(
+  apiFramework: ApiFramework,
+): (PackageManager | PythonPackageManager)[] {
+  const config = apiFrameworks.get(apiFramework);
+  return (config?.packageManagers as (PackageManager | PythonPackageManager)[]) ?? [];
+}
+
+export function isPythonPackageManager(
+  pm: PackageManager | PythonPackageManager,
+): pm is PythonPackageManager {
+  return pm === "pip" || pm === "poetry" || pm === "uv";
+}
+
+export function getApiFrameworkConfig(
+  fw: ApiFramework,
+): ApiFrameworkConfig | undefined {
+  return apiFrameworks.get(fw);
+}
+
+export function getWebFrameworkConfig(
+  fw: WebFramework,
+): WebFrameworkConfig | undefined {
+  return webFrameworks.get(fw);
+}
+
+export function getMobileFrameworkConfig(
+  fw: MobileFramework,
+): MobileFrameworkConfig | undefined {
+  return mobileFrameworks.get(fw);
 }
