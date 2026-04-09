@@ -1,6 +1,6 @@
 {
   "name": "@atnexuslab/create-app",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI interativo para criar projetos com os boilerplates da ATNexusLab",
   "type": "module",
   "bin": {

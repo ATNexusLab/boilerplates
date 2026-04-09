@@ -112,6 +112,11 @@ function isCommandAvailable(cmd: string): boolean {
   }
 }
 
+function getPackageNameForApp(projectName: string, appType?: string): string {
+  if (!appType) return projectName;
+  return `${appType}-${projectName}`;
+}
+
 function copyDir(src: string, dest: string): void {
   if (!fs.existsSync(src)) return;
   fs.cpSync(src, dest, {
@@ -528,6 +533,7 @@ function scaffoldSingleProject(
   framework: Framework,
   choices: UserChoices,
   isBackend: boolean,
+  appName?: string,
 ): void {
   // 1. Copy base template
   const baseDir = path.join(templatesDir, "base", framework);
@@ -664,6 +670,33 @@ function scaffoldSingleProject(
   if (choices.includeCI) {
     applyOverlay(targetDir, "github-actions");
   }
+
+  // 9. Replace template variables (including package name if appName provided)
+  const templateVars: Record<string, string> = {
+    PROJECT_NAME: appName || choices.projectName,
+  };
+
+  // Set PRISMA_PROVIDER if needed
+  if (isBackend && backend?.orm === "prisma" && backend.database) {
+    const providerMap: Record<string, string> = {
+      postgresql: "postgresql",
+      mysql: "mysql",
+      mongodb: "mongodb",
+    };
+    templateVars.PRISMA_PROVIDER = providerMap[backend.database];
+  }
+
+  // Set DATABASE_URL placeholder
+  if (isBackend && backend?.database) {
+    const urlMap: Record<string, string> = {
+      postgresql: "postgresql://user:password@localhost:5432/app",
+      mysql: "mysql://user:password@localhost:3306/app",
+      mongodb: "mongodb://user:password@localhost:27017/app",
+    };
+    templateVars.DATABASE_URL = urlMap[backend.database];
+  }
+
+  replaceVariables(targetDir, templateVars);
 }
 
 // ── Bun Test Swap ────────────────────────────────────────────────────────
@@ -740,33 +773,6 @@ export async function scaffold(choices: UserChoices): Promise<void> {
     // Write .editorconfig
     fs.writeFileSync(path.join(targetDir, ".editorconfig"), EDITORCONFIG);
 
-    // Replace template variables
-    const templateVars: Record<string, string> = {
-      PROJECT_NAME: choices.projectName,
-    };
-
-    // Set PRISMA_PROVIDER if needed
-    if (choices.backend?.orm === "prisma" && choices.backend.database) {
-      const providerMap: Record<string, string> = {
-        postgresql: "postgresql",
-        mysql: "mysql",
-        mongodb: "mongodb",
-      };
-      templateVars.PRISMA_PROVIDER = providerMap[choices.backend.database];
-    }
-
-    // Set DATABASE_URL placeholder
-    if (choices.backend?.database) {
-      const urlMap: Record<string, string> = {
-        postgresql: "postgresql://user:password@localhost:5432/app",
-        mysql: "mysql://user:password@localhost:3306/app",
-        mongodb: "mongodb://user:password@localhost:27017/app",
-      };
-      templateVars.DATABASE_URL = urlMap[choices.backend.database];
-    }
-
-    replaceVariables(targetDir, templateVars);
-
     // Bun test swap: replace vitest with bun's native test runner
     applyBunTestSwap(targetDir, choices);
 
@@ -820,19 +826,22 @@ function scaffoldMonorepo(targetDir: string, choices: UserChoices): void {
   // Scaffold backend in apps/api/
   if (choices.backend) {
     const apiDir = path.join(appsDir, "api");
-    scaffoldSingleProject(apiDir, choices.backend.apiFramework, choices, true);
+    const apiPackageName = getPackageNameForApp(choices.projectName, "api");
+    scaffoldSingleProject(apiDir, choices.backend.apiFramework, choices, true, apiPackageName);
   }
 
   // Scaffold web frontend in apps/web/
   if (choices.frontend?.webFramework) {
     const webDir = path.join(appsDir, "web");
-    scaffoldSingleProject(webDir, choices.frontend.webFramework, choices, false);
+    const webPackageName = getPackageNameForApp(choices.projectName, "web");
+    scaffoldSingleProject(webDir, choices.frontend.webFramework, choices, false, webPackageName);
   }
 
   // Scaffold mobile in apps/mobile/
   if (choices.frontend?.mobileFramework) {
     const mobileDir = path.join(appsDir, "mobile");
-    scaffoldSingleProject(mobileDir, choices.frontend.mobileFramework, choices, false);
+    const mobilePackageName = getPackageNameForApp(choices.projectName, "mobile");
+    scaffoldSingleProject(mobileDir, choices.frontend.mobileFramework, choices, false, mobilePackageName);
   }
 
   // Generate root files
@@ -872,28 +881,6 @@ ${parts.join("\n")}
 Cada app tem seu próprio \`package.json\` (ou \`requirements.txt\`). Acesse o diretório de cada app para instalar dependências e rodar.
 `;
   fs.writeFileSync(path.join(targetDir, "README.md"), readme);
-
-  // Root package.json with workspaces (for JS/TS apps only)
-  const jsApps: string[] = [];
-  if (choices.backend && !isPythonFramework(choices.backend.apiFramework)) {
-    jsApps.push("apps/api");
-  }
-  if (choices.frontend?.webFramework) jsApps.push("apps/web");
-  if (choices.frontend?.mobileFramework && choices.frontend.mobileFramework !== "flutter") {
-    jsApps.push("apps/mobile");
-  }
-
-  if (jsApps.length > 0) {
-    const rootPkg = {
-      name: choices.projectName,
-      private: true,
-      workspaces: jsApps,
-    };
-    fs.writeFileSync(
-      path.join(targetDir, "package.json"),
-      JSON.stringify(rootPkg, null, 2) + "\n",
-    );
-  }
 }
 
 // ── Post-scaffold ──────────────────────────────────────────────────────────
