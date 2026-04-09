@@ -4,7 +4,7 @@
   "description": "CLI interativo para criar projetos com os boilerplates da ATNexusLab",
   "type": "module",
   "bin": {
-    "create-app": "./dist/index.js"
+    "create-app": "dist/index.js"
   },
   "files": [
     "dist",
