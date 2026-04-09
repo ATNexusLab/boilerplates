@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "app"
     ENV: str = "development"
     DEBUG: bool = True
-    HOST: str = "0.0.0.0"
+    HOST: str = "localhost"
     PORT: int = 8000
     LOG_LEVEL: str = "info"
 

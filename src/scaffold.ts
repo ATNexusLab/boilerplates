@@ -65,7 +65,7 @@ const TEXT_EXTENSIONS = new Set([
   ".prisma",
 ]);
 
-const SKIP_FILES = new Set(["template.json", "overlay.json"]);
+const SKIP_FILES = new Set(["template.json", "overlay.json", ".env.example"]);
 
 const EDITORCONFIG = `root = true
 
@@ -103,7 +103,8 @@ function isTextFile(filename: string): boolean {
 
 function isCommandAvailable(cmd: string): boolean {
   try {
-    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    const isWindows = process.platform === "win32";
+    execSync(isWindows ? `where ${cmd}` : `command -v ${cmd}`, { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -303,6 +304,38 @@ function getDevCommand(pm: PackageManager | PythonPackageManager): string {
   }
 }
 
+/** Returns the command to bootstrap-install a package manager when it's missing. */
+function getPackageManagerBootstrapCommand(pm: PackageManager | PythonPackageManager): string | null {
+  switch (pm) {
+    case "bun":    return "npm install -g bun";
+    case "pnpm":   return "npm install -g pnpm";
+    case "yarn":   return "npm install -g yarn";
+    case "poetry": return "pip install poetry";
+    case "uv":     return "pip install uv";
+    default:       return null; // npm and pip are assumed pre-installed
+  }
+}
+
+async function ensurePackageManagerInstalled(pm: PackageManager | PythonPackageManager): Promise<boolean> {
+  const bin = pm === "npm" ? "npm" : String(pm);
+  if (isCommandAvailable(bin)) return true;
+
+  const bootstrapCmd = getPackageManagerBootstrapCommand(pm);
+  if (!bootstrapCmd) return false;
+
+  const s = p.spinner();
+  s.start(`${pm} não encontrado. Instalando automaticamente...`);
+  try {
+    execSync(bootstrapCmd, { stdio: "ignore" });
+    s.stop(`${pm} instalado com ${pc.green("sucesso")}.`);
+    return true;
+  } catch {
+    s.stop(pc.yellow(`⚠ Não foi possível instalar ${pm} automaticamente.`));
+    p.log.info(`Instale manualmente: ${pc.cyan(bootstrapCmd)}`);
+    return false;
+  }
+}
+
 // ── Prerequisites ──────────────────────────────────────────────────────────
 
 function checkPrerequisites(choices: UserChoices): void {
@@ -313,25 +346,6 @@ function checkPrerequisites(choices: UserChoices): void {
       p.log.warn(
         pc.yellow("⚠ Flutter CLI não encontrado no PATH. Instale em https://flutter.dev/docs/get-started/install"),
       );
-    }
-  }
-
-  const pms = getPackageManagers(choices);
-  for (const pm of pms) {
-    if (pm === "bun" && !isCommandAvailable("bun")) {
-      p.log.warn(pc.yellow("⚠ Bun não encontrado no PATH. Instale em https://bun.sh"));
-    }
-    if (pm === "pnpm" && !isCommandAvailable("pnpm")) {
-      p.log.warn(pc.yellow("⚠ pnpm não encontrado no PATH. Instale com: npm install -g pnpm"));
-    }
-    if (pm === "yarn" && !isCommandAvailable("yarn")) {
-      p.log.warn(pc.yellow("⚠ Yarn não encontrado no PATH. Instale com: npm install -g yarn"));
-    }
-    if (pm === "poetry" && !isCommandAvailable("poetry")) {
-      p.log.warn(pc.yellow("⚠ Poetry não encontrado no PATH. Instale em https://python-poetry.org"));
-    }
-    if (pm === "uv" && !isCommandAvailable("uv")) {
-      p.log.warn(pc.yellow("⚠ uv não encontrado no PATH. Instale em https://docs.astral.sh/uv"));
     }
   }
 }
@@ -537,6 +551,12 @@ function scaffoldSingleProject(
     );
   }
   copyDir(baseDir, targetDir);
+
+  // Copy base .env.example explicitly (SKIP_FILES prevents copyDir from doing it)
+  const baseEnvPath = path.join(baseDir, ".env.example");
+  if (fs.existsSync(baseEnvPath)) {
+    fs.copyFileSync(baseEnvPath, path.join(targetDir, ".env.example"));
+  }
 
   const backend = isBackend ? choices.backend : null;
   const frontend = !isBackend ? choices.frontend : null;
@@ -926,7 +946,8 @@ async function maybeInstallDependencies(
   targetDir: string,
   pm: PackageManager,
 ): Promise<void> {
-  if (!isCommandAvailable(pm === "npm" ? "npm" : pm)) return;
+  const pmAvailable = await ensurePackageManagerInstalled(pm);
+  if (!pmAvailable) return;
 
   const install = await p.confirm({
     message: "Deseja instalar as dependências agora?",

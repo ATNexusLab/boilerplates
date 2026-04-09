@@ -11,7 +11,7 @@ class Settings:
     APP_NAME: str = os.getenv("APP_NAME", "app")
     FLASK_ENV: str = os.getenv("FLASK_ENV", "development")
     FLASK_DEBUG: bool = os.getenv("FLASK_DEBUG", "1") == "1"
-    HOST: str = os.getenv("HOST", "0.0.0.0")
+    HOST: str = os.getenv("HOST", "localhost")
     PORT: int = int(os.getenv("PORT", "5000"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production")
