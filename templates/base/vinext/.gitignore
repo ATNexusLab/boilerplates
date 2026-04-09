@@ -3,3 +3,8 @@ node_modules/
 dist/
 .DS_Store
 *.tgz
+.env
+.env.local
+.env.*.local
+*.log
+logs/

@@ -14,7 +14,9 @@ RUN npm run build
 FROM base AS release
 COPY --from=deps /app/node_modules node_modules
 COPY --from=build /app/dist dist
-COPY package.json .
+COPY package.json .env.example ./
 
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+CMD ["node", "dist/server.js"]

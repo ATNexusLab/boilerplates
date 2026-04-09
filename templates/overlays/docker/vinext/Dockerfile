@@ -17,4 +17,6 @@ COPY --from=build /app/dist dist
 COPY package.json .
 
 EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/ || exit 1
 CMD ["npm", "run", "start"]

@@ -17,6 +17,7 @@ export interface UserChoices {
   linter: Linter | null;
   includeBetterAuth: boolean;
   includeDocker: boolean;
+  includeCI: boolean;
 }
 
 const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
@@ -119,6 +120,15 @@ export async function runPrompts(): Promise<UserChoices> {
     includeDocker = docker;
   }
 
+  let includeCI = false;
+  if (framework !== "flutter") {
+    const ci = await p.confirm({
+      message: "Incluir GitHub Actions CI?",
+    });
+    if (p.isCancel(ci)) cancelAndExit();
+    includeCI = ci;
+  }
+
   p.outro(pc.green("Configuração concluída! Criando projeto..."));
 
   return {
@@ -129,5 +139,6 @@ export async function runPrompts(): Promise<UserChoices> {
     linter,
     includeBetterAuth,
     includeDocker,
+    includeCI,
   };
 }

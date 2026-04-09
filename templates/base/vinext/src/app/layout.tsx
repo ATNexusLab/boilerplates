@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "{{PROJECT_NAME}}",
   description: "Created with @atnexuslab/create-app",

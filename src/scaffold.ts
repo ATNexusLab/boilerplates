@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import * as p from "@clack/prompts";
 import pc from "picocolors";
 import type { UserChoices } from "./prompts.js";
+import type { PackageManager } from "./templates.js";
 
 const templatesDir = path.resolve(
   fileURLToPath(import.meta.url),
@@ -53,14 +56,36 @@ const TEXT_EXTENSIONS = new Set([
 
 const SKIP_FILES = new Set(["template.json", "overlay.json"]);
 
+const EDITORCONFIG = `root = true
+
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.md]
+trim_trailing_whitespace = false
+`;
+
 function isTextFile(filename: string): boolean {
   const ext = path.extname(filename).toLowerCase();
   if (TEXT_EXTENSIONS.has(ext)) return true;
-  // Files without extension that are commonly text
   const base = path.basename(filename);
   return ["Dockerfile", "Makefile", ".gitignore", ".dockerignore"].includes(
     base,
   );
+}
+
+function isCommandAvailable(cmd: string): boolean {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function copyDir(src: string, dest: string): void {
@@ -113,6 +138,24 @@ function mergePackageJson(targetPath: string, overlayPath: string): void {
   fs.writeFileSync(targetPath, JSON.stringify(target, null, 2) + "\n");
 }
 
+function mergeEnvExample(targetDir: string, overlayDir: string, sectionName: string): void {
+  const targetEnv = path.join(targetDir, ".env.example");
+  const overlayEnv = path.join(overlayDir, ".env.example");
+
+  if (!fs.existsSync(overlayEnv)) return;
+
+  const overlayContent = fs.readFileSync(overlayEnv, "utf-8").trim();
+
+  if (!fs.existsSync(targetEnv)) {
+    fs.writeFileSync(targetEnv, overlayContent + "\n");
+    return;
+  }
+
+  const existing = fs.readFileSync(targetEnv, "utf-8").trimEnd();
+  const merged = `${existing}\n\n# ${sectionName}\n${overlayContent}\n`;
+  fs.writeFileSync(targetEnv, merged);
+}
+
 function replaceVariables(
   dir: string,
   vars: Record<string, string>,
@@ -143,6 +186,50 @@ function replaceVariables(
   }
 }
 
+function getInstallCommand(pm: PackageManager): string {
+  switch (pm) {
+    case "bun": return "bun install";
+    case "pnpm": return "pnpm install";
+    case "yarn": return "yarn install";
+    default: return "npm install";
+  }
+}
+
+function getDevCommand(pm: PackageManager): string {
+  switch (pm) {
+    case "bun": return "bun dev";
+    case "pnpm": return "pnpm dev";
+    case "yarn": return "yarn dev";
+    default: return "npm run dev";
+  }
+}
+
+function checkPrerequisites(choices: UserChoices): void {
+  if (choices.framework === "flutter" && !isCommandAvailable("flutter")) {
+    p.log.warn(
+      pc.yellow("⚠ Flutter CLI não encontrado no PATH. Instale em https://flutter.dev/docs/get-started/install"),
+    );
+  }
+
+  if (choices.packageManager === "bun" && !isCommandAvailable("bun")) {
+    p.log.warn(
+      pc.yellow("⚠ Bun não encontrado no PATH. Instale em https://bun.sh"),
+    );
+  }
+
+  if (choices.packageManager === "pnpm" && !isCommandAvailable("pnpm")) {
+    p.log.warn(
+      pc.yellow("⚠ pnpm não encontrado no PATH. Instale com: npm install -g pnpm"),
+    );
+  }
+
+  if (choices.packageManager === "yarn" && !isCommandAvailable("yarn")) {
+    p.log.warn(
+      pc.yellow("⚠ Yarn não encontrado no PATH. Instale com: npm install -g yarn"),
+    );
+  }
+}
+
 export async function scaffold(choices: UserChoices): Promise<void> {
   const targetDir = path.resolve(process.cwd(), choices.projectName);
 
@@ -152,78 +239,153 @@ export async function scaffold(choices: UserChoices): Promise<void> {
     );
   }
 
-  // 1. Copy base template
+  // Check prerequisites
+  checkPrerequisites(choices);
+
+  // Verify base template exists
   const baseDir = path.join(templatesDir, "base", choices.framework);
   if (!fs.existsSync(baseDir)) {
     throw new Error(
       `Template base não encontrado para "${choices.framework}". Verifique se os templates estão instalados.`,
     );
   }
-  copyDir(baseDir, targetDir);
 
-  const targetPkgPath = path.join(targetDir, "package.json");
+  try {
+    // 1. Copy base template
+    copyDir(baseDir, targetDir);
 
-  // 2. Apply linter overlay
-  if (choices.linter) {
-    const linterDir = path.join(templatesDir, "overlays", choices.linter);
-    copyDir(linterDir, targetDir);
+    const targetPkgPath = path.join(targetDir, "package.json");
 
-    const linterOverlay = path.join(linterDir, "overlay.json");
-    mergePackageJson(targetPkgPath, linterOverlay);
+    // 2. Apply linter overlay
+    if (choices.linter) {
+      const linterDir = path.join(templatesDir, "overlays", choices.linter);
+      copyDir(linterDir, targetDir);
+
+      const linterOverlay = path.join(linterDir, "overlay.json");
+      mergePackageJson(targetPkgPath, linterOverlay);
+    }
+
+    // 3. Apply Better Auth overlay
+    if (choices.includeBetterAuth) {
+      const authDir = path.join(
+        templatesDir,
+        "overlays",
+        "better-auth",
+        choices.framework,
+      );
+      copyDir(authDir, targetDir);
+
+      const authOverlay = path.join(authDir, "overlay.json");
+      mergePackageJson(targetPkgPath, authOverlay);
+      mergeEnvExample(targetDir, authDir, "Better Auth");
+    }
+
+    // 4. Apply Docker overlay
+    if (choices.includeDocker) {
+      const dockerDir = path.join(
+        templatesDir,
+        "overlays",
+        "docker",
+        choices.framework,
+      );
+      copyDir(dockerDir, targetDir);
+
+      const dockerOverlay = path.join(dockerDir, "overlay.json");
+      mergePackageJson(targetPkgPath, dockerOverlay);
+    }
+
+    // 5. Apply GitHub Actions CI overlay
+    if (choices.includeCI) {
+      const ciDir = path.join(templatesDir, "overlays", "github-actions");
+      copyDir(ciDir, targetDir);
+    }
+
+    // 6. Write .editorconfig
+    fs.writeFileSync(path.join(targetDir, ".editorconfig"), EDITORCONFIG);
+
+    // 7. Replace template variables
+    replaceVariables(targetDir, {
+      PROJECT_NAME: choices.projectName,
+    });
+
+    // 8. Initialize git repository
+    if (isCommandAvailable("git")) {
+      try {
+        execSync("git init", { cwd: targetDir, stdio: "ignore" });
+        execSync("git add -A", { cwd: targetDir, stdio: "ignore" });
+        execSync('git commit -m "chore: initial project setup"', {
+          cwd: targetDir,
+          stdio: "ignore",
+        });
+        p.log.success("Repositório git inicializado com commit inicial.");
+      } catch {
+        p.log.warn(pc.yellow("⚠ Não foi possível inicializar o repositório git."));
+      }
+    }
+
+    // 9. Print success
+    console.log();
+    console.log(pc.green("✅ Projeto criado com sucesso!"));
+    console.log();
+
+    // 10. Install dependencies
+    if (choices.framework === "flutter") {
+      printFlutterInstructions(choices.projectName);
+    } else {
+      const pm = choices.packageManager ?? "npm";
+      await maybeInstallDependencies(targetDir, pm);
+      printInstructions(choices.projectName, pm);
+    }
+
+    console.log();
+  } catch (error) {
+    // Rollback: remove created directory on failure
+    if (fs.existsSync(targetDir)) {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    }
+    throw error;
   }
+}
 
-  // 3. Apply Better Auth overlay
-  if (choices.includeBetterAuth) {
-    const authDir = path.join(
-      templatesDir,
-      "overlays",
-      "better-auth",
-      choices.framework,
-    );
-    copyDir(authDir, targetDir);
+async function maybeInstallDependencies(
+  targetDir: string,
+  pm: PackageManager,
+): Promise<void> {
+  if (!isCommandAvailable(pm === "npm" ? "npm" : pm)) return;
 
-    const authOverlay = path.join(authDir, "overlay.json");
-    mergePackageJson(targetPkgPath, authOverlay);
-  }
-
-  // 4. Apply Docker overlay
-  if (choices.includeDocker) {
-    const dockerDir = path.join(
-      templatesDir,
-      "overlays",
-      "docker",
-      choices.framework,
-    );
-    copyDir(dockerDir, targetDir);
-
-    const dockerOverlay = path.join(dockerDir, "overlay.json");
-    mergePackageJson(targetPkgPath, dockerOverlay);
-  }
-
-  // 5. Replace template variables
-  replaceVariables(targetDir, {
-    PROJECT_NAME: choices.projectName,
+  const install = await p.confirm({
+    message: "Deseja instalar as dependências agora?",
+    initialValue: true,
   });
 
-  // 6. Print post-creation instructions
-  console.log();
-  console.log(pc.green("✅ Projeto criado com sucesso!"));
-  console.log();
-  console.log(pc.bold("Próximos passos:"));
+  if (p.isCancel(install) || !install) return;
 
-  if (choices.framework === "flutter") {
-    console.log(`  ${pc.cyan(`cd ${choices.projectName}`)}`);
-    console.log(`  ${pc.cyan("flutter pub get")}`);
-    console.log(`  ${pc.cyan("flutter run")}`);
-  } else {
-    const pm = choices.packageManager ?? "npm";
-    const installCmd = pm === "bun" ? "bun install" : "npm install";
-    const devCmd = pm === "bun" ? "bun dev" : "npm run dev";
+  const installCmd = getInstallCommand(pm);
+  const s = p.spinner();
+  s.start(`Instalando dependências com ${pm}...`);
 
-    console.log(`  ${pc.cyan(`cd ${choices.projectName}`)}`);
-    console.log(`  ${pc.cyan(installCmd)}`);
-    console.log(`  ${pc.cyan(devCmd)}`);
+  try {
+    execSync(installCmd, { cwd: targetDir, stdio: "ignore" });
+    s.stop(`Dependências instaladas com ${pc.green("sucesso")}.`);
+  } catch {
+    s.stop(pc.yellow("⚠ Falha ao instalar dependências."));
+    p.log.info(`Execute manualmente: ${pc.cyan(`cd ${path.basename(targetDir)} && ${installCmd}`)}`);
   }
+}
 
-  console.log();
+function printFlutterInstructions(projectName: string): void {
+  console.log(pc.bold("Próximos passos:"));
+  console.log(`  ${pc.cyan(`cd ${projectName}`)}`);
+  console.log(`  ${pc.cyan("flutter pub get")}`);
+  console.log(`  ${pc.cyan("flutter run")}`);
+}
+
+function printInstructions(projectName: string, pm: PackageManager): void {
+  const installCmd = getInstallCommand(pm);
+  const devCmd = getDevCommand(pm);
+
+  console.log(pc.bold("Próximos passos:"));
+  console.log(`  ${pc.cyan(`cd ${projectName}`)}`);
+  console.log(`  ${pc.cyan(installCmd)}`);
+  console.log(`  ${pc.cyan(devCmd)}`);
 }

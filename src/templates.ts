@@ -8,7 +8,7 @@ export type Framework =
   | "vinext"
   | "flutter"
   | "react-native";
-export type PackageManager = "npm" | "bun";
+export type PackageManager = "npm" | "bun" | "pnpm" | "yarn";
 export type Linter = "eslint-prettier" | "biome";
 
 export interface FrameworkConfig {
@@ -40,7 +40,7 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
       name: "express",
       displayName: "ExpressJS",
       type: "backend",
-      packageManagers: ["npm", "bun"],
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
       supportsBetterAuth: true,
       supportsDocker: true,
       supportsVite: false,
@@ -52,7 +52,7 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
       name: "react",
       displayName: "React",
       type: "frontend",
-      packageManagers: ["npm", "bun"],
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
       supportsBetterAuth: false,
       supportsDocker: true,
       supportsVite: true,
@@ -64,7 +64,7 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
       name: "vue",
       displayName: "Vue",
       type: "frontend",
-      packageManagers: ["npm", "bun"],
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
       supportsBetterAuth: false,
       supportsDocker: true,
       supportsVite: true,
@@ -76,7 +76,7 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
       name: "nextjs",
       displayName: "NextJS",
       type: "fullstack",
-      packageManagers: ["npm", "bun"],
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
       supportsBetterAuth: true,
       supportsDocker: true,
       supportsVite: false,
@@ -88,7 +88,7 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
       name: "vinext",
       displayName: "Vinext",
       type: "fullstack",
-      packageManagers: ["npm", "bun"],
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
       supportsBetterAuth: true,
       supportsDocker: true,
       supportsVite: true,
@@ -112,7 +112,7 @@ export const frameworks: Map<Framework, FrameworkConfig> = new Map([
       name: "react-native",
       displayName: "React Native",
       type: "mobile",
-      packageManagers: ["npm", "bun"],
+      packageManagers: ["npm", "bun", "pnpm", "yarn"],
       supportsBetterAuth: false,
       supportsDocker: false,
       supportsVite: false,
