@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "{{PROJECT_NAME}}",
+    "slug": "{{PROJECT_NAME}}",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "{{PROJECT_NAME}}",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": ["expo-router"]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "deploy": "vinext deploy"
+  },
+  "dependencies": {
+    "react": "^19.1",
+    "react-dom": "^19.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0",
+    "@types/react": "^19.1",
+    "@types/react-dom": "^19.1",
+    "@vitejs/plugin-react": "^4.5",
+    "typescript": "^5.8",
+    "vinext": "^0.1",
+    "vite": "^6.3"
+  }
+}

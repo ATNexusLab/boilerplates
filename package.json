@@ -1,0 +1,55 @@
+{
+  "name": "@atnexuslab/create-app",
+  "version": "0.1.0",
+  "description": "CLI interativo para criar projetos com os boilerplates da ATNexusLab",
+  "type": "module",
+  "bin": {
+    "create-app": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ATNexusLab/boilerplates.git"
+  },
+  "keywords": [
+    "boilerplate",
+    "scaffold",
+    "cli",
+    "create-app",
+    "elysiajs",
+    "express",
+    "react",
+    "nextjs",
+    "vinext",
+    "flutter",
+    "react-native",
+    "vue",
+    "typescript"
+  ],
+  "author": "ATNexusLab",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ATNexusLab/boilerplates/issues"
+  },
+  "homepage": "https://github.com/ATNexusLab/boilerplates#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.2.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.2"
+  }
+}
