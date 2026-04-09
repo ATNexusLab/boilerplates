@@ -12,7 +12,7 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = settings.SECRET_KEY
 
-    CORS(app)
+    CORS(app, origins=settings.CORS_ORIGINS)
 
     Limiter(
         app=app,

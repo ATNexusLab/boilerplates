@@ -4,7 +4,8 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import type { UserChoices, BackendChoices, FrontendChoices } from "./prompts.js";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import type { UserChoices } from "./prompts.js";
 import {
   type PackageManager,
   type PythonPackageManager,
@@ -113,22 +114,10 @@ function isCommandAvailable(cmd: string): boolean {
 
 function copyDir(src: string, dest: string): void {
   if (!fs.existsSync(src)) return;
-
-  fs.mkdirSync(dest, { recursive: true });
-
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    if (SKIP_FILES.has(entry.name)) continue;
-
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      copyDir(srcPath, destPath);
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
+  fs.cpSync(src, dest, {
+    recursive: true,
+    filter: (source) => !SKIP_FILES.has(path.basename(source)),
+  });
 }
 
 interface PackageJson {
@@ -148,12 +137,22 @@ interface OverlayJson extends PackageJson {
 function mergePackageJson(targetPath: string, overlayPath: string): void {
   if (!fs.existsSync(targetPath) || !fs.existsSync(overlayPath)) return;
 
-  const target: PackageJson = JSON.parse(
-    fs.readFileSync(targetPath, "utf-8"),
-  );
-  const overlay: PackageJson = JSON.parse(
-    fs.readFileSync(overlayPath, "utf-8"),
-  );
+  let target: PackageJson;
+  let overlay: PackageJson;
+
+  try {
+    target = JSON.parse(fs.readFileSync(targetPath, "utf-8"));
+  } catch {
+    p.log.warn(pc.yellow(`⚠ Não foi possível ler ${targetPath} (JSON inválido). Pulando merge.`));
+    return;
+  }
+
+  try {
+    overlay = JSON.parse(fs.readFileSync(overlayPath, "utf-8"));
+  } catch {
+    p.log.warn(pc.yellow(`⚠ Não foi possível ler ${overlayPath} (JSON inválido). Pulando merge.`));
+    return;
+  }
 
   for (const key of [
     "dependencies",
@@ -221,9 +220,13 @@ function mergeEnvExampleContent(targetDir: string, sectionName: string, content:
 function mergePythonDeps(targetDir: string, overlayPath: string): void {
   if (!fs.existsSync(overlayPath)) return;
 
-  const overlay: OverlayJson = JSON.parse(
-    fs.readFileSync(overlayPath, "utf-8"),
-  );
+  let overlay: OverlayJson;
+  try {
+    overlay = JSON.parse(fs.readFileSync(overlayPath, "utf-8"));
+  } catch {
+    p.log.warn(pc.yellow(`⚠ Não foi possível ler ${overlayPath} (JSON inválido). Pulando merge de deps Python.`));
+    return;
+  }
 
   if (!overlay.python) return;
 
@@ -365,108 +368,8 @@ function getPackageManagers(choices: UserChoices): (PackageManager | PythonPacka
   return [...new Set(pms)];
 }
 
+
 // ── Docker Compose Generation ──────────────────────────────────────────────
-
-function generateDockerComposeServices(
-  appFramework: Framework,
-  database: Database | null,
-  cache: Cache | null,
-): string {
-  let yaml = "";
-
-  // DB service
-  if (database === "postgresql") {
-    yaml += `
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: \${DB_USER:-postgres}
-      POSTGRES_PASSWORD: \${DB_PASSWORD:-postgres}
-      POSTGRES_DB: \${DB_NAME:-app}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-`;
-  } else if (database === "mysql") {
-    yaml += `
-  db:
-    image: mysql:8
-    restart: unless-stopped
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: \${DB_PASSWORD:-root}
-      MYSQL_DATABASE: \${DB_NAME:-app}
-      MYSQL_USER: \${DB_USER:-app}
-      MYSQL_PASSWORD: \${DB_PASSWORD:-app}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-`;
-  } else if (database === "mongodb") {
-    yaml += `
-  db:
-    image: mongo:7
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: \${DB_USER:-mongo}
-      MONGO_INITDB_ROOT_PASSWORD: \${DB_PASSWORD:-mongo}
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-`;
-  }
-
-  // Cache service
-  if (cache === "redis") {
-    yaml += `
-  cache:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-`;
-  }
-
-  return yaml;
-}
-
-function generateDockerComposeVolumes(
-  database: Database | null,
-  cache: Cache | null,
-): string {
-  const volumes: string[] = [];
-  if (database === "postgresql") volumes.push("  postgres_data:");
-  if (database === "mysql") volumes.push("  mysql_data:");
-  if (database === "mongodb") volumes.push("  mongo_data:");
-  if (cache === "redis") volumes.push("  redis_data:");
-  if (volumes.length === 0) return "";
-  return "\nvolumes:\n" + volumes.join("\n") + "\n";
-}
 
 function appendDockerComposeServices(
   targetDir: string,
@@ -478,28 +381,111 @@ function appendDockerComposeServices(
   if (!fs.existsSync(dcPath)) return;
   if (!database && !cache) return;
 
-  let content = fs.readFileSync(dcPath, "utf-8");
-
-  // Add depends_on to app service
-  const dependsOn: string[] = [];
-  if (database) dependsOn.push("db");
-  if (cache) dependsOn.push("cache");
-
-  if (dependsOn.length > 0) {
-    const dependsOnYaml = dependsOn.map((d) => `      - ${d}`).join("\n");
-    // Insert depends_on after env_file block (key + indented items)
-    content = content.replace(
-      /(    env_file:\n(?:      - .+\n)*)/,
-      `$1    depends_on:\n${dependsOnYaml}\n`,
-    );
+  let doc: Record<string, unknown>;
+  try {
+    doc = parseYaml(fs.readFileSync(dcPath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    p.log.warn(pc.yellow("⚠ Não foi possível parsear docker-compose.yml. Serviços de DB/Cache não adicionados."));
+    return;
   }
 
-  // Append services before volumes (or at end)
-  const extraServices = generateDockerComposeServices(framework, database, cache);
-  const extraVolumes = generateDockerComposeVolumes(database, cache);
+  const services = (doc.services ?? {}) as Record<string, unknown>;
 
-  content = content.trimEnd() + "\n" + extraServices + extraVolumes;
-  fs.writeFileSync(dcPath, content);
+  // Add depends_on to the app service
+  const appService = services[framework] as Record<string, unknown> | undefined;
+  if (appService) {
+    const deps: string[] = [];
+    if (database) deps.push("db");
+    if (cache) deps.push("cache");
+    if (deps.length > 0) {
+      appService.depends_on = deps;
+    }
+  }
+
+  // Append DB service
+  if (database === "postgresql") {
+    services.db = {
+      image: "postgres:16-alpine",
+      restart: "unless-stopped",
+      ports: ["5432:5432"],
+      environment: {
+        POSTGRES_USER: "${DB_USER:-postgres}",
+        POSTGRES_PASSWORD: "${DB_PASSWORD:-postgres}",
+        POSTGRES_DB: "${DB_NAME:-app}",
+      },
+      volumes: ["postgres_data:/var/lib/postgresql/data"],
+      healthcheck: {
+        test: ["CMD-SHELL", "pg_isready -U postgres"],
+        interval: "10s",
+        timeout: "5s",
+        retries: 5,
+      },
+    };
+  } else if (database === "mysql") {
+    services.db = {
+      image: "mysql:8",
+      restart: "unless-stopped",
+      ports: ["3306:3306"],
+      environment: {
+        MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:-root}",
+        MYSQL_DATABASE: "${DB_NAME:-app}",
+        MYSQL_USER: "${DB_USER:-app}",
+        MYSQL_PASSWORD: "${DB_PASSWORD:-app}",
+      },
+      volumes: ["mysql_data:/var/lib/mysql"],
+      healthcheck: {
+        test: ["CMD", "mysqladmin", "ping", "-h", "localhost"],
+        interval: "10s",
+        timeout: "5s",
+        retries: 5,
+      },
+    };
+  } else if (database === "mongodb") {
+    services.db = {
+      image: "mongo:7",
+      restart: "unless-stopped",
+      ports: ["27017:27017"],
+      environment: {
+        MONGO_INITDB_ROOT_USERNAME: "${DB_USER:-mongo}",
+        MONGO_INITDB_ROOT_PASSWORD: "${DB_PASSWORD:-mongo}",
+      },
+      volumes: ["mongo_data:/data/db"],
+      healthcheck: {
+        test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"],
+        interval: "10s",
+        timeout: "5s",
+        retries: 5,
+      },
+    };
+  }
+
+  // Append cache service
+  if (cache === "redis") {
+    services.cache = {
+      image: "redis:7-alpine",
+      restart: "unless-stopped",
+      ports: ["6379:6379"],
+      volumes: ["redis_data:/data"],
+      healthcheck: {
+        test: ["CMD", "redis-cli", "ping"],
+        interval: "10s",
+        timeout: "5s",
+        retries: 5,
+      },
+    };
+  }
+
+  doc.services = services;
+
+  // Ensure volumes section
+  const volumes = (doc.volumes ?? {}) as Record<string, unknown>;
+  if (database === "postgresql") volumes.postgres_data = null;
+  if (database === "mysql") volumes.mysql_data = null;
+  if (database === "mongodb") volumes.mongo_data = null;
+  if (cache === "redis") volumes.redis_data = null;
+  if (Object.keys(volumes).length > 0) doc.volumes = volumes;
+
+  fs.writeFileSync(dcPath, stringifyYaml(doc));
 }
 
 // ── Overlay Application ────────────────────────────────────────────────────
@@ -811,6 +797,7 @@ export async function scaffold(choices: UserChoices): Promise<void> {
   } catch (error) {
     if (fs.existsSync(targetDir)) {
       fs.rmSync(targetDir, { recursive: true, force: true });
+      p.log.warn(pc.yellow(`⚠ Processo abortado. O diretório "${choices.projectName}" foi removido.`));
     }
     throw error;
   }

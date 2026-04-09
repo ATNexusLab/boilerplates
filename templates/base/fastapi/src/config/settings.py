@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     HOST: str = "localhost"
     PORT: int = 8000
     LOG_LEVEL: str = "info"
+    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     @property
     def is_production(self) -> bool:

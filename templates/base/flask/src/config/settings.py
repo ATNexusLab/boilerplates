@@ -1,5 +1,7 @@
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 
 from dotenv import load_dotenv
 
@@ -15,6 +17,11 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "5000"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production")
+    CORS_ORIGINS: List[str] = field(
+        default_factory=lambda: json.loads(
+            os.getenv("CORS_ORIGINS", '["http://localhost:3000"]')
+        )
+    )
 
     @property
     def is_production(self) -> bool:
