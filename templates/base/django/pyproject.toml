@@ -6,11 +6,15 @@ requires-python = ">=3.12"
 dependencies = [
     "django>=5.1",
     "django-cors-headers>=4.6",
+    "django-ratelimit>=4.1",
     "gunicorn>=23.0",
     "python-dotenv>=1.0",
+    "structlog>=24.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "ruff>=0.8",
+    "pytest>=8.0",
+    "pytest-django>=4.9",
 ]

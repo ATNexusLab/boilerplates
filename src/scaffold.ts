@@ -660,6 +660,50 @@ function scaffoldSingleProject(
   }
 }
 
+// ── Bun Test Swap ────────────────────────────────────────────────────────
+
+function applyBunTestSwap(targetDir: string, choices: UserChoices): void {
+  const pms: string[] = [];
+  if (choices.backend) pms.push(choices.backend.packageManager);
+  if (choices.frontend) pms.push(choices.frontend.packageManager);
+
+  if (!pms.includes("bun")) return;
+
+  const pkgFiles = findFiles(targetDir, "package.json");
+  for (const pkgPath of pkgFiles) {
+    try {
+      const raw = fs.readFileSync(pkgPath, "utf-8");
+      const pkg = JSON.parse(raw);
+
+      if (pkg.scripts?.test === "vitest run") {
+        pkg.scripts.test = "bun test";
+      }
+
+      if (pkg.devDependencies?.vitest) {
+        delete pkg.devDependencies.vitest;
+      }
+
+      fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    } catch {
+      // skip non-parseable files
+    }
+  }
+}
+
+function findFiles(dir: string, filename: string): string[] {
+  const results: string[] = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== "node_modules") {
+      results.push(...findFiles(full, filename));
+    } else if (entry.name === filename) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
 // ── Main Scaffold ──────────────────────────────────────────────────────────
 
 export async function scaffold(choices: UserChoices): Promise<void> {
@@ -716,6 +760,9 @@ export async function scaffold(choices: UserChoices): Promise<void> {
     }
 
     replaceVariables(targetDir, templateVars);
+
+    // Bun test swap: replace vitest with bun's native test runner
+    applyBunTestSwap(targetDir, choices);
 
     // Initialize git repository
     if (isCommandAvailable("git")) {

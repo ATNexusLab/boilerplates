@@ -1,3 +1,4 @@
+import { logger } from "./lib/logger.js";
 import { env } from "./config/env.js";
 
 const port = env.PORT;
@@ -7,19 +8,19 @@ async function startServer() {
   const { app } = await import("./app.js");
 
   const server = app.listen(port, host, () => {
-    console.log(`🚀 Server running at http://${host}:${port}`);
-    console.log(`📋 Health check: http://${host}:${port}/health`);
+    logger.info({ host, port }, `Server running at http://${host}:${port}`);
+    logger.info(`Health check: http://${host}:${port}/health`);
   });
 
   const shutdown = () => {
-    console.log("\n⏳ Shutting down gracefully...");
+    logger.info("Shutting down gracefully...");
     server.close(() => {
-      console.log("✅ Server closed.");
+      logger.info("Server closed.");
       process.exit(0);
     });
 
     setTimeout(() => {
-      console.error("⚠ Forced shutdown after timeout.");
+      logger.error("Forced shutdown after timeout.");
       process.exit(1);
     }, 10_000);
   };

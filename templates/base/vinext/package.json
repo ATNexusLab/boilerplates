@@ -7,7 +7,8 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "deploy": "vinext deploy"
+    "deploy": "vinext deploy",
+    "test": "vitest run"
   },
   "dependencies": {
     "react": "^19.1",
@@ -20,6 +21,7 @@
     "@vitejs/plugin-react": "^4.5",
     "typescript": "^5.8",
     "vinext": "^0.1",
-    "vite": "^6.3"
+    "vite": "^6.3",
+    "vitest": "^3.0"
   }
 }

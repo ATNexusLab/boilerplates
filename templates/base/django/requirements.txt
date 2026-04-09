@@ -1,4 +1,6 @@
 django>=5.1
 django-cors-headers>=4.6
+django-ratelimit>=4.1
 gunicorn>=23.0
 python-dotenv>=1.0
+structlog>=24.0

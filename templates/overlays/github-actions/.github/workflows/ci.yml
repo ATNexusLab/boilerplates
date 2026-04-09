@@ -13,9 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect package manager
-        id: detect-pm
+      - name: Detect project type
+        id: detect
         run: |
+          if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+            echo "type=python" >> $GITHUB_OUTPUT
+          else
+            echo "type=node" >> $GITHUB_OUTPUT
+          fi
+
           if [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then
             echo "manager=bun" >> $GITHUB_OUTPUT
             echo "install=bun install --frozen-lockfile" >> $GITHUB_OUTPUT
@@ -34,27 +40,60 @@ jobs:
             echo "run=npm run" >> $GITHUB_OUTPUT
           fi
 
+      # --- Node.js setup ---
       - name: Setup Bun
-        if: steps.detect-pm.outputs.manager == 'bun'
+        if: steps.detect.outputs.type == 'node' && steps.detect.outputs.manager == 'bun'
         uses: oven-sh/setup-bun@v2
 
       - name: Setup pnpm
-        if: steps.detect-pm.outputs.manager == 'pnpm'
+        if: steps.detect.outputs.type == 'node' && steps.detect.outputs.manager == 'pnpm'
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
-        if: steps.detect-pm.outputs.manager != 'bun'
+        if: steps.detect.outputs.type == 'node' && steps.detect.outputs.manager != 'bun'
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: ${{ steps.detect-pm.outputs.manager }}
+          cache: ${{ steps.detect.outputs.manager }}
 
-      - name: Install dependencies
-        run: ${{ steps.detect-pm.outputs.install }}
+      - name: Install dependencies (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: ${{ steps.detect.outputs.install }}
 
-      - name: Lint
-        run: ${{ steps.detect-pm.outputs.run }} lint
+      - name: Lint (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: ${{ steps.detect.outputs.run }} lint
         continue-on-error: true
 
-      - name: Build
-        run: ${{ steps.detect-pm.outputs.run }} build
+      - name: Test (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: ${{ steps.detect.outputs.run }} test
+
+      - name: Build (Node)
+        if: steps.detect.outputs.type == 'node'
+        run: ${{ steps.detect.outputs.run }} build
+
+      # --- Python setup ---
+      - name: Setup Python
+        if: steps.detect.outputs.type == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (Python)
+        if: steps.detect.outputs.type == 'python'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          if [ -f "pyproject.toml" ]; then
+            pip install ".[dev]"
+          fi
+
+      - name: Lint (Python)
+        if: steps.detect.outputs.type == 'python'
+        run: ruff check .
+        continue-on-error: true
+
+      - name: Test (Python)
+        if: steps.detect.outputs.type == 'python'
+        run: pytest

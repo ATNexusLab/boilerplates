@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "bun run --hot src/server.ts",
     "start": "bun run src/server.ts",
-    "build": "bun build src/server.ts --outdir ./dist --target bun"
+    "build": "bun build src/server.ts --outdir ./dist --target bun",
+    "test": "bun test"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.2",
-    "elysia": "^1.2"
+    "elysia": "^1.2",
+    "elysia-rate-limit": "^4.0",
+    "pino": "^9.0"
   },
   "devDependencies": {
     "@types/bun": "latest"
